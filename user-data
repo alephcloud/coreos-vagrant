@@ -1,0 +1,146 @@
+#cloud-config
+
+ssh_authorized_keys:
+  - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDuzpzBMJJkN567TAWPNSQw4Nlm9ngWAnb30bxtx1MQVdOViIul9JKf+QXHqEscXybCO4DbAMmiP02pJy2fniOwPl9CVWyuNoI5CYJxFHyegL75dyGSWD8iHkl6t119b42Bnc0ZVbt1/nx2Kna0NpGSbMuXQ4GorXTMglKd6QAzj/yqrarUakJSWh832xgs0IbHha4DxkYBMH1D8ozetwZfWAYeW4MVfR6KUkwBnDefKFHh1JeroW6WBvhHGO7XNMEJKKu19eoTvtajo5ucJwv4D8McxnqSzw7YyBny+T/AIuX+kfoUIT0/QBdzhqslVPcQNWUIoJiZ+ZgrKNEGhRHB7xvMynwENXEkVg155qITcEyjmTUtTZ9DnWNafvhLVViCHUMBPtgZTRwVbsEpiNodD2j0QbZaf3/gX0/46QstqPKlgZ8I3zAcG8+FB8sXrhmh8vcr1SjasdKuqKKQ8UahQ/mNDRaC06VZ9P73MYn6GwgcOB98gEs/R/90FBSRv+YS1MXuWLklt9b3VtJE2w4pJqOnNallOOBtfNK42xsSXilMvjsWxAT/OC2Kvra/6TbA1Jq9InT1SA+2XzwSJ2pfKiB4M87aLhm+9gktg6Uwr7uc+XzFHxyR7sHdQImgqx/wKGeV2xKBrqGwaPo8TCNIkbNlWGgrZbVXDBT8cZu7tw== iknapp@alephcloud.com
+
+coreos:
+  units:
+    - name: remove-oem-key.service
+      command: start
+      content: |
+        [Unit]
+        Description=Delete any OEM-provided ssh keys.
+        After=coreos-cloudinit-vagrant.service
+        
+        [Service]
+        Type=oneshot
+        RemainAfterExit=true
+        ExecStart=-/usr/bin/update-ssh-keys -u core -d oem
+        
+        [Install]
+        RequiredBy=local.target
+    - name: docker-tcp.socket
+      command: start
+      content: |
+        [Unit]
+        Description=Docker Socket for the API
+
+        [Socket]
+        ListenStream=4243
+        Service=docker.service
+        BindIPv6Only=both
+
+        [Install]
+        WantedBy=sockets.target
+    - name: unmount-media-host.service
+      command: start
+      content: |
+        [Unit]
+        Description=Unmount /media/host in case it was done manually.
+        
+        [Service]
+        Type=oneshot
+        RemainAfterExit=true
+        ExecStart=-/usr/bin/umount /media/host
+        
+        [Install]
+    - name: media-host.mount
+      command: start
+      content: |
+        [Unit]
+        Requires=remote-fs-pre.target
+        Requires=unmount-media-host.service
+        
+        [Mount]
+        What=172.17.8.1:/Users/iknapp/.coreos
+        Where=/media/host
+        Type=nfs
+        Options=nolock,vers=3,udp
+        
+        [Install]
+        WantedBy=local.target
+    - name: media-state-from-host.path
+      command: start
+      content: |
+        [Unit]
+        Requires=media-host.mount
+        
+        [Path]
+        Unit=media-state-from-host.target
+        PathExists=/media/host/state.btrfs
+        
+        [Install]
+        WantedBy=local.target
+    - name: media-state-from-host.target
+      command: stop
+      content: |
+        [Unit]
+        Requires=media-state.mount
+        Requires=var-lib-docker.mount
+        Requires=docker.socket
+        
+        [Install]
+    - name: media-state.mount
+      command: stop
+      content: |
+        [Unit]
+        Requires=media-state-from-host.path
+        
+        [Mount]
+        What=/media/host/state.btrfs
+        Where=/media/state
+        Type=btrfs
+        Options=loop
+        
+        [Install]
+        RequiredBy=var-lib-docker.mount
+        WantedBy=local.target
+    - name: var-lib-docker.mount
+      command: stop
+      content: |
+        [Unit]
+        Requires=media-state.mount
+        Before=docker.service
+        
+        [Mount]
+        What=/media/state/docker
+        Where=/var/lib/docker
+        Options=bind
+        
+        [Install]
+        RequiredBy=docker.service
+    - name: media-state-tricky.service
+      runtime: true
+      command: stop
+      content: |
+        [Unit]
+        
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/bash -c "/usr/bin/systemctl daemon-reload; /usr/bin/systemctl start media-state-from-host.target"
+        User=root
+        
+        [Install]
+    - name: media-state-tricky.timer
+      runtime: true
+      command: start
+      content: |
+        [Unit]
+        
+        [Timer]
+        OnActiveSec=2
+        
+        [Install]
+    - name: dev-certificate.service
+      command: stop
+      content: |
+        [Unit]
+        
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/ln -s /media/state/AlephCloud_development_nginx.pem /etc/ssl/certs/
+        ExecStart=/usr/sbin/update-ca-certificates
+        User=root
+        
+        [Install]
+        WantedBy=local.target

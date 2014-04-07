@@ -11,6 +11,8 @@ Vagrant.configure("2") do |config|
   config.vm.box = "coreos-alpha"
   config.vm.box_url = "http://storage.core-os.net/coreos/amd64-usr/alpha/coreos_production_vagrant.box"
 
+  config.ssh.private_key_path = ["#{ENV['HOME']}/.ssh/iknapp.id", "#{ENV['HOME']}/.vagrant.d/insecure_private_key"]
+
   config.vm.provider :vmware_fusion do |vb, override|
     override.vm.box_url = "http://storage.core-os.net/coreos/amd64-usr/alpha/coreos_production_vagrant_vmware_fusion.box"
   end
@@ -32,15 +34,18 @@ Vagrant.configure("2") do |config|
 
       ip = "172.17.8.#{i+100}"
       config.vm.network :private_network, ip: ip
+      #config.vm.network :public_network, :bridge => 'en0: Wi-Fi (AirPort)'
+      config.vm.network :forwarded_port, guest: 4243, host: 4243, :host_ip => "127.0.0.1"
+      (49000..49900).each do |port|
+        config.vm.network :forwarded_port, :host => port, :host_ip => "127.0.0.1", :guest => port
+      end
 
-      # Uncomment below to enable NFS for sharing the host machine into the coreos-vagrant VM.
-      #config.vm.synced_folder ".", "/home/core/share", id: "core", :nfs => true, :mount_options => ['nolock,vers=3,udp']
+      config.vm.synced_folder "#{ENV['HOME']}/.coreos", "/media/host", id: "core", :nfs => true, :mount_options => ['nolock,vers=3,udp']
 
       if File.exist?(CLOUD_CONFIG_PATH)
         config.vm.provision :file, :source => "#{CLOUD_CONFIG_PATH}", :destination => "/tmp/vagrantfile-user-data"
         config.vm.provision :shell, :inline => "mv /tmp/vagrantfile-user-data /var/lib/coreos-vagrant/", :privileged => true
       end
-
     end
   end
 end
